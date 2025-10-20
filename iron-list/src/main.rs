@@ -11,9 +11,15 @@ struct Cli {
     /// Path to todo file (default: ironlist.txt)
     #[arg(short, long, value_name = "FILE", default_value = "ironlist.txt")]
     file: PathBuf,
+    /// Persist a default file path and exit
+    #[arg(long = "set-default", value_name = "PATH")]
+    set_default: Option<PathBuf>,
+    /// Show the currently saved default and exit
+    #[arg(long = "show-default")]
+    show_default: bool,
 
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -25,6 +31,22 @@ enum Commands {
         /// The raw line to append (e.g. "YYYY-MM-DD\tDescription\ttag1,tag2")
         #[arg(value_name = "LINE")]
         line: String,
+    },
+    /// Edit an entry by its printed number (from `list`). Replacement_line must be a valid entry.
+    Edit {
+        /// 1-based index as shown in `list`
+        #[arg(value_name = "INDEX")]
+        index: usize,
+
+        /// The replacement line (same format as `add`)
+        #[arg(value_name = "LINE")]
+        line: String,
+    },
+    /// Mark an entry (by printed number from `list`) as complete by adding the `complete` tag.
+    Complete {
+        /// 1-based index as shown in `list`
+        #[arg(value_name = "INDEX")]
+        index: usize,
     },
     /// Query entries by date range and/or tags
     Query {
@@ -165,6 +187,23 @@ fn append_entry(path: &PathBuf, line: &str) -> io::Result<()> {
     Ok(())
 }
 
+fn write_entries_to_file(path: &PathBuf, entries: &[Entry]) -> io::Result<()> {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+
+    let mut f = OpenOptions::new().create(true).write(true).truncate(true).open(path)?;
+    for e in entries {
+        let line = entry_to_line(e);
+        f.write_all(line.as_bytes())?;
+        f.write_all(b"\n")?;
+    }
+    Ok(())
+}
+
 fn entry_to_line(e: &Entry) -> String {
     let tag_str = if e.tags.is_empty() { String::new() } else { e.tags.join(",") };
     if tag_str.is_empty() {
@@ -213,29 +252,147 @@ fn filter_by_tags(entries: Vec<Entry>, tags: &[String], any: bool) -> Vec<Entry>
 }
 
 fn print_numbered(entries: &[Entry]) {
+    // Table columns:
+    // No. (right-aligned width 3) | Date (10) | Task (30, wrapped) | Tags (rest)
+    const NUM_AREA: usize = 5; // e.g. "  1. " length
+    const TASK_W: usize = 30;
+    const TAG_W: usize = 20;
+
+    // Header
+    println!("{:>3}  {:10}  {:30}  {:<width$}", "No", "Date", "Task", "Tags", width = TAG_W);
+    // underline: dashes matching each column width (tags column uses TAG_W)
+    let tag_underline = "-".repeat(TAG_W);
+    println!("{:->3}  {:->10}  {:->30}  {}", "", "", "", tag_underline);
+
     for (i, e) in entries.iter().enumerate() {
-        let tag_str = if e.tags.is_empty() {
-            String::from("-")
-        } else {
-            e.tags.join(",")
-        };
-        println!("{}. {}\t{}\t[{}]", i + 1, e.date.format("%Y-%m-%d"), e.desc, tag_str);
+        let tag_str = if e.tags.is_empty() { String::from("-") } else { e.tags.join(",") };
+
+        let date_str = e.date.format("%Y-%m-%d").to_string();
+        let wrapped = wrap_text(&e.desc, TASK_W);
+
+        for (line_idx, task_line) in wrapped.iter().enumerate() {
+            if line_idx == 0 {
+                // first line: print number, date, first task part, tags
+                println!("{:>3}. {:10}  {:30}  {:<width$}", i + 1, date_str, task_line, tag_str, width = TAG_W);
+            } else {
+                // continuation lines: blank number and date columns
+                let spacer = " ".repeat(NUM_AREA);
+                println!("{}{:10}  {:30}  {:<width$}", spacer, "", task_line, "", width = TAG_W);
+            }
+        }
+        // if description was empty, still print a line
+        if wrapped.is_empty() {
+            println!("{:>3}. {:10}  {:30}  {}", i + 1, date_str, "", tag_str);
+        }
     }
+}
+
+/// Simple word-wrap helper: splits on whitespace and builds lines of maximum `width` characters.
+fn wrap_text(s: &str, width: usize) -> Vec<String> {
+    if s.trim().is_empty() {
+        return vec![];
+    }
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for word in s.split_whitespace() {
+        if current.is_empty() {
+            if word.chars().count() <= width {
+                current.push_str(word);
+            } else {
+                // word longer than width -> hard-break
+                let mut start = 0;
+                let chars: Vec<char> = word.chars().collect();
+                while start < chars.len() {
+                    let end = (start + width).min(chars.len());
+                    let slice: String = chars[start..end].iter().collect();
+                    lines.push(slice);
+                    start = end;
+                }
+            }
+        } else {
+            let tentative = format!("{} {}", current, word);
+            if tentative.chars().count() <= width {
+                current = tentative;
+            } else {
+                // move current into lines and leave current empty
+                lines.push(std::mem::take(&mut current));
+                // start new line with word
+                if word.chars().count() <= width {
+                    current = word.to_string();
+                } else {
+                    // word itself is longer than width; break it
+                    let mut start = 0;
+                    let chars: Vec<char> = word.chars().collect();
+                    while start < chars.len() {
+                        let end = (start + width).min(chars.len());
+                        let slice: String = chars[start..end].iter().collect();
+                        if end < chars.len() {
+                            lines.push(slice);
+                        } else {
+                            current = slice;
+                        }
+                        start = end;
+                    }
+                }
+            }
+        }
+    }
+    if !current.is_empty() {
+        lines.push(std::mem::take(&mut current));
+    }
+    lines
 }
 
 fn main() -> io::Result<()> {
     let cli = Cli::parse();
-    // Resolve the file path: if the user passed a simple file name (like "ironlist.txt"),
-    // try to find it two directories up (workspace root). This allows running the
-    // binary from the crate directory while keeping the data file next to the workspace root.
-    // Hardcoded path requested by user
-    let hardcoded = PathBuf::from(r"C:\Users\barde\IronList\ironlist.txt");
-    // If the user supplied an explicit path (either absolute or relative) and it exists, prefer it.
-    // Otherwise fall back to the hardcoded path.
+    // If the user asked to show the saved default, print and exit.
+    if cli.show_default {
+        if let Some(p) = read_saved_default() {
+            println!("Saved default: {}", p.display());
+        } else {
+            println!("No saved default");
+        }
+        return Ok(());
+    }
+
+    // If the user asked to persist a default path, handle special cases and exit.
+    if let Some(p) = &cli.set_default {
+        // special case: '-' clears the saved default
+        if p.as_os_str() == "-" {
+            clear_saved_default()?;
+            println!("Cleared saved default");
+            return Ok(());
+        }
+
+        // validate existence; if missing prompt to create
+        if !p.exists() {
+            eprintln!("Provided path does not exist: {}", p.display());
+            eprintln!("Create the file? (y/N)");
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input).ok();
+            if input.trim().eq_ignore_ascii_case("y") {
+                if let Some(parent) = p.parent() {
+                    std::fs::create_dir_all(parent).ok();
+                }
+                std::fs::File::create(p)?;
+                eprintln!("Created file: {}", p.display());
+            } else {
+                eprintln!("Aborted; not saving default.");
+                return Ok(());
+            }
+        }
+
+        persist_default_path(p)?;
+        println!("Saved default path to config: {}", p.display());
+        return Ok(());
+    }
+
+    // Determine the data file path. If the user passed an explicit --file that exists, prefer it.
+    // Otherwise consult the persisted default (or ask the user on first run).
     let file_path = if cli.file.as_os_str() != "ironlist.txt" && cli.file.exists() {
         cli.file.clone()
     } else {
-        hardcoded
+        get_or_ask_default_file()?
     };
     let mut entries = read_entries(&file_path)?;
 
@@ -243,10 +400,10 @@ fn main() -> io::Result<()> {
     entries.sort_by_key(|e| e.date);
 
     match cli.command {
-        Commands::List {} => {
+        None | Some(Commands::List {}) => {
             print_numbered(&entries);
         }
-    Commands::Query { from, to, date, tag, any } => {
+        Some(Commands::Query { from, to, date, tag, any }) => {
             // Require at least one criterion (date range, exact date, or tag)
             if from.is_none() && to.is_none() && date.is_none() && tag.is_empty() {
                 eprintln!("Query requires at least one of --from, --to, --date or --tag");
@@ -268,7 +425,7 @@ fn main() -> io::Result<()> {
             let by_tags = filter_by_tags(by_date, &tag, any);
             print_numbered(&by_tags);
         }
-        Commands::Add { line } => {
+    Some(Commands::Add { line }) => {
             // Validate and normalize the line before appending
             let parsed = match parse_line(&line) {
                 Some(e) => e,
@@ -281,8 +438,143 @@ fn main() -> io::Result<()> {
             append_entry(&file_path, &norm)?;
             println!("Appended normalized entry to {}", file_path.display());
         }
+    Some(Commands::Edit { index, line }) => {
+            // Validate replacement
+            let parsed = match parse_line(&line) {
+                Some(e) => e,
+                None => {
+                    eprintln!("Replacement line is malformed; expected: YYYY-MM-DD<TAB>Description<TAB>tag1,tag2");
+                    std::process::exit(1);
+                }
+            };
+
+            if index == 0 || index > entries.len() {
+                eprintln!("Index out of range: {} (there are {} entries)", index, entries.len());
+                std::process::exit(1);
+            }
+
+            // Replace (index is 1-based)
+            entries[index - 1] = parsed;
+
+            // Write all entries back to the file (normalized)
+            write_entries_to_file(&file_path, &entries)?;
+            println!("Replaced entry {} in {}", index, file_path.display());
+        }
+    Some(Commands::Complete { index }) => {
+            if index == 0 || index > entries.len() {
+                eprintln!("Index out of range: {} (there are {} entries)", index, entries.len());
+                std::process::exit(1);
+            }
+
+            let tags = &mut entries[index - 1].tags;
+            // add 'complete' tag if not already present (case-insensitive)
+            if !tags.iter().any(|t| t.eq_ignore_ascii_case("complete")) {
+                tags.push("complete".to_string());
+            }
+
+            write_entries_to_file(&file_path, &entries)?;
+            println!("Marked entry {} as complete in {}", index, file_path.display());
+        }
     }
 
+    Ok(())
+}
+
+/// Returns the persisted default file path or prompts the user to enter one and persists it.
+fn get_or_ask_default_file() -> io::Result<PathBuf> {
+    use std::io::{Write, stdin};
+
+    // Try home directory first
+    let mut config_paths = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        config_paths.push(home.join(".ironlist_default"));
+    }
+    // fallback to current directory
+    config_paths.push(PathBuf::from(".ironlist_default"));
+
+    for cfg in &config_paths {
+        if cfg.exists() {
+            if let Ok(s) = std::fs::read_to_string(cfg) {
+                let trimmed = s.trim();
+                if !trimmed.is_empty() {
+                    return Ok(PathBuf::from(trimmed));
+                }
+            }
+        }
+    }
+
+    // Not found: prompt the user
+    eprintln!("No default data file configured. Please enter the path to your ironlist file:");
+    let mut input = String::new();
+    stdin().read_line(&mut input).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let entered = input.trim();
+    if entered.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "No path entered"));
+    }
+
+    let path = PathBuf::from(entered);
+
+    // Persist into the first available config path (prefer home)
+    if let Some(cfg) = config_paths.get(0) {
+        if let Some(parent) = cfg.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        if let Ok(mut f) = std::fs::File::create(cfg) {
+            writeln!(f, "{}", path.display()).ok();
+        }
+    }
+
+    Ok(path)
+}
+
+fn persist_default_path(path: &PathBuf) -> io::Result<()> {
+    let cfg = if let Some(home) = dirs::home_dir() {
+        home.join(".ironlist_default")
+    } else {
+        PathBuf::from(".ironlist_default")
+    };
+
+    if let Some(parent) = cfg.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    let mut f = std::fs::File::create(cfg)?;
+    use std::io::Write;
+    writeln!(f, "{}", path.display())?;
+    Ok(())
+}
+
+fn read_saved_default() -> Option<PathBuf> {
+    if let Some(home) = dirs::home_dir() {
+        let cfg = home.join(".ironlist_default");
+        if cfg.exists() {
+            if let Ok(s) = std::fs::read_to_string(cfg) {
+                let t = s.trim();
+                if !t.is_empty() {
+                    return Some(PathBuf::from(t));
+                }
+            }
+        }
+    }
+    if let Ok(s) = std::fs::read_to_string(".ironlist_default") {
+        let t = s.trim();
+        if !t.is_empty() {
+            return Some(PathBuf::from(t));
+        }
+    }
+    None
+}
+
+fn clear_saved_default() -> io::Result<()> {
+    if let Some(home) = dirs::home_dir() {
+        let cfg = home.join(".ironlist_default");
+        if cfg.exists() {
+            std::fs::remove_file(cfg)?;
+            return Ok(());
+        }
+    }
+    if PathBuf::from(".ironlist_default").exists() {
+        std::fs::remove_file(".ironlist_default")?;
+    }
     Ok(())
 }
 

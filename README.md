@@ -1,22 +1,23 @@
+
 # IronList
 
 A small CLI tool for managing a simple date-tagged todo list stored in a plain text file.
 
-This README documents every command, option and behavior implemented in the current codebase.
+This README documents the current commands, flags and behaviors implemented in the codebase.
 
 ---
 
 ## Summary
 
-IronList reads a text file where each entry is a single line in the (normalized) format:
+IronList stores each entry as a single, normalized line:
 
 ```
 YYYY-MM-DD<TAB>Description<TAB>tag1,tag2
 ```
 
-- The program accepts either literal tabs as separators or runs of 4+ spaces when parsing input from shells that don't accept tabs.
-- When adding entries the program validates and *normalizes* the entry to use literal tabs before writing to disk.
-- Tags are a comma-separated list on the third field (optional).
+- Input parsing accepts literal TAB characters or runs of 4+ spaces as field separators (helpful when shells make typing tabs awkward).
+- On write (when adding or editing) the program normalizes entries to the canonical tab-separated format.
+- Tags are an optional comma-separated list in the third field; queries match tags case-insensitively by default.
 
 ---
 
@@ -30,198 +31,221 @@ cd iron-list
 cargo build --release
 ```
 
-The debug/dev build is created with `cargo build`.
+For day-to-day development use `cargo build`.
 
 ---
 
-## Where the data file lives
+## Data file selection and configuration
 
-By default the program uses the hardcoded absolute path:
+The program chooses a data file using the following precedence:
 
+1. If you pass `-f/--file <PATH>` and that path exists at startup, it is used.
+2. Otherwise the program uses a persisted default path (created by the program on first run or set with `--set-default`).
+3. If no persisted default exists the program prompts you to enter one interactively and saves it.
+
+Persistence location:
+- Preferred: `$HOME/.ironlist_default` (the user's home directory).
+- Fallback: `./.ironlist_default` in the current working directory.
+
+Commands to manage the saved default:
+- `--set-default <PATH>` — saves the provided path and exits. If the path does not exist the program prompts to create it. Passing `-` (a single dash) clears the saved default.
+- `--show-default` — prints the currently saved default (or `No saved default`) and exits.
+
+Examples:
+
+```powershell
+# persist a default path (prompts to create file if missing)
+cargo run -- --set-default C:\path\to\ironlist.txt
+
+# clear saved default
+cargo run -- --set-default -
+
+# show saved default
+cargo run -- --show-default
 ```
-C:\Users\barde\IronList\ironlist.txt
-```
 
-You can override this with `-f` / `--file` and point to a different file. The program currently prefers a user-provided `--file` only when that path already exists. If the provided `--file` does not exist, the program will fall back to the hardcoded default path.
-
-Important: the program attempts to read the file at startup. If the chosen file (after the selection logic described above) does not exist, the program will fail when attempting to read entries. In other words, `add` will not create the file unless the selected file already exists at startup. (The append code will create a missing file on write, but the read-at-start behavior prevents reaching that write code if the file is missing.)
-
-If you want to append to a new file, create it first (empty file) or pass a `--file` that already exists. Changing this behavior (so `add` creates the file unconditionally) is a small code change and can be added on request.
+Notes:
+- The program reads the selected file at startup. If the final selected path does not exist, the program will error when reading entries (unless you created the file earlier or chose to create it during `--set-default`).
+- You can still use `--file` to temporarily point to a different file (only used if the path exists at startup).
 
 ---
 
 ## Usage
 
-All commands are run from the crate directory (or via the built executable). Basic usage pattern:
+Top-level flags work without providing a subcommand. If no subcommand is given the default action is `list`.
 
 ```powershell
 # show help
 cargo run -- --help
 
-# run a command
+# show saved default
+cargo run -- --show-default
+
+# list (no subcommand required)
+cargo run --
+
+# run a command explicitly
 cargo run -- <command> [options]
 ```
 
-### Global option
-
-- `-f`, `--file <FILE>`
-  - Path to the todo file. Default value (if you don't provide a file) is `ironlist.txt` which participates in the selection logic described above. If you pass a path that already exists, it will be used. Otherwise the hardcoded default will be used.
+Global option
+- `-f`, `--file <FILE>` — Path to the todo file. The program will use this path only if it exists at startup; otherwise the persisted default will be used.
 
 ---
 
 ## Commands
 
-### list
+### list (default)
 
-```
+```powershell
 cargo run -- list
 ```
 
-List all entries. Output is numbered, sorted by date ascending. Each printed line shows: number, date, description and tags (tags are shown inside square brackets). If an entry has no tags, `-` is printed.
+Prints a three-column table with headers and wrapped task descriptions:
+
+- Column 1: `No` — item number (right-aligned).
+- Column 2: `Date` — `YYYY-MM-DD` (10 chars).
+- Column 3: `Task` — description (30 characters width, word-wrapped).
+- Column 4: `Tags` — comma-separated tags (left-aligned; width ~20 in the current layout).
+
+The output is sorted by date ascending. Multi-line task descriptions are printed with continuation lines aligned under the `Task` column.
+
+Example:
+
+```
+ No   Date        Task                           Tags
+---  ----------  ------------------------------  --------------------
+  1. 2025-10-18  Buy iron and supplies           tools,home
+     2025-10-18  (continued task text wraps here)
+```
 
 ### add
 
-```
+```powershell
 cargo run -- add "<LINE>"
 ```
 
-Append a new entry. `LINE` should be a single-line string that contains at least a date and a description, and optionally tags. The expected input format is:
+Append a new entry. `LINE` must contain at least a date and a description. Expected input example:
 
 ```
 YYYY-MM-DD<TAB>Description<TAB>tag1,tag2
 ```
 
-Because typing a literal tab in many shells is awkward, the parser also accepts runs of 4 or more spaces as field separators. For example both of these are accepted:
+Because tabs are inconvenient in some shells the parser also accepts runs of 4+ spaces as separators. Valid examples:
 
 ```powershell
 cargo run -- add "2025-10-18\tBuy iron\ttools,home"
-cargo run -- add "2025-10-18    Buy iron    tools,home"  # 4+ spaces as separators
+cargo run -- add "2025-10-18    Buy iron    tools,home"
 ```
 
-What happens when you `add`:
+On add the program validates the date and presence of a description. If valid it writes a normalized tab-separated line to disk.
 
-1. The program validates the provided line using the same parser it uses for reading entries. Validation checks: date parses as `YYYY-MM-DD` and there is at least a date and a description.
-2. If validation fails, the program prints an error and exits without writing.
-3. If validation succeeds, the entry is normalized into the canonical tab-separated format and appended to the chosen file (with a trailing newline). Example normalized output:
+### edit
 
-```
-2025-10-18\tBuy iron\ttools,home
+```powershell
+cargo run -- edit <INDEX> "<LINE>"
 ```
 
-Notes about files: as mentioned above the program reads the file at startup. If the selected file does not exist at startup the program will fail before the `add` handler runs. Create the file first if you plan to append to a brand-new file.
+Replace the numbered entry shown by `list` with the provided normalized line. The replacement is validated before being written. At the moment the program rewrites the file with normalized entries when editing.
+
+### complete
+
+```powershell
+cargo run -- complete <INDEX>
+```
+
+Mark the chosen (numbered) entry as complete by adding a `complete` tag (case-insensitive check prevents duplicates). This operation currently rewrites the normalized file.
 
 ### query
 
-```
+```powershell
 cargo run -- query [--from DATE] [--to DATE] [--date DATE] [--tag TAG]... [--any]
 ```
 
-Query entries by date range and/or tags. At least one of `--from`, `--to`, `--date`, or `--tag` must be provided.
+Filter by date range and/or tags. At least one of `--from`, `--to`, `--date`, or `--tag` must be provided.
 
 Options:
-- `--from <DATE>`
-  - Inclusive start date. Format: `YYYY-MM-DD`.
-- `--to <DATE>`
-  - Inclusive end date. Format: `YYYY-MM-DD`.
-- `--date <DATE>`
-  - Exact date match shorthand (sets both `from` and `to` to the same date).
-- `--tag <TAG>` (repeatable)
-  - Tag filter. You may pass this flag multiple times; a single `--tag` value may contain no commas (the program expects comma-separated tags only when they appear in the file itself). The program matches tags case-insensitively.
-- `--any`
-  - By default multiple `--tag` flags are combined with AND semantics (an entry must include *all* provided tags). If `--any` is supplied, tags are combined with OR semantics (an entry that contains any one of the provided tags will match).
+- `--from <DATE>` — Inclusive start date (YYYY-MM-DD).
+- `--to <DATE>` — Inclusive end date (YYYY-MM-DD).
+- `--date <DATE>` — Shorthand exact-date match (sets both `from` and `to`).
+- `--tag <TAG>` — Repeatable tag filter (case-insensitive).
+- `--any` — Switch tag filtering from AND (default) to OR semantics.
 
 Behavior notes:
-- Date filtering is inclusive and combined with tag filtering: the query returns only entries that satisfy both the date constraints and the tag constraints (if provided).
-- Examples:
-  - Query entries on an exact date with tags (AND):
-    ```powershell
-    cargo run -- query --date 2025-10-18 --tag work --tag urgent
-    ```
-    Returns entries on 2025-10-18 that contain both `work` and `urgent` (case-insensitive).
-  - Query entries in a date range with OR tag semantics:
-    ```powershell
-    cargo run -- query --from 2025-10-01 --to 2025-10-31 --any --tag personal --tag errands
-    ```
-    Returns entries in October 2025 that have either `personal` or `errands`.
+- Date filtering is inclusive and combined with tag filtering.
+- Tags are matched case-insensitively.
+
+Example:
+
+```powershell
+cargo run -- query --date 2025-10-18 --tag work --tag urgent
+```
 
 ---
 
 ## File format details
 
-- Each entry is a single line containing at least two fields:
-  1. `YYYY-MM-DD` (date, required)
-  2. `Description` (string, required)
-  3. `tag1,tag2,...` (optional, comma-separated, no spaces required — whitespace will be trimmed)
-
-- Accepted input separators when parsing:
-  - Literal TAB characters (`\t`)
-  - Runs of 4 or more spaces (helps enter data from shells that don't accept literal tabs)
-
-- Normalization on write:
-  - When you `add` an entry the program writes a normalized, tab-separated line to the file using the canonical order: date, tab, description, tab, comma-separated tags (if any).
-
-- Tag matching:
-  - Tags are matched case-insensitively for queries.
-  - Default semantics for multiple `--tag` flags is AND (entry must contain all tags). Use `--any` to switch to OR semantics.
+- Each entry is a single line: `YYYY-MM-DD<TAB>Description<TAB>tag1,tag2`.
+- Accepted input separators when parsing: literal `\t` or runs of 4+ spaces.
+- On write, entries are normalized to the canonical tab-separated form.
+- Tag matching for queries is case-insensitive; stored tags preserve the user's casing.
 
 ---
 
-## Examples
+## Examples (quick)
 
-Append an item (using spaces as separators):
+Append using spaces:
 
 ```powershell
 cargo run -- add "2025-10-18    Buy iron    tools,home"
 ```
 
-List everything:
+Show saved default:
 
 ```powershell
-cargo run -- list
+cargo run -- --show-default
 ```
 
-Query by exact date:
+Set default (creates file if you confirm):
 
 ```powershell
-cargo run -- query --date 2025-10-18
+cargo run -- --set-default C:\Users\barde\IronList\ironlist.txt
 ```
 
-Query by date range and tags (AND semantics):
+Clear saved default:
 
 ```powershell
-cargo run -- query --from 2025-10-01 --to 2025-10-31 --tag work --tag urgent
+cargo run -- --set-default -
 ```
 
-Query by tags with OR semantics:
+List everything (no subcommand required):
+
+```powershell
+cargo run --
+```
+
+Query with OR tags:
 
 ```powershell
 cargo run -- query --any --tag personal --tag errands
-```
-
-Use a different file (only used if the path exists at startup; otherwise the default hardcoded path will be used):
-
-```powershell
-cargo run -- -f C:\temp\mylist.txt list
 ```
 
 ---
 
 ## Troubleshooting & notes
 
-- If the program fails with an I/O error on startup, verify the chosen file exists and is readable. The program reads the file on startup; if it doesn't exist the process will exit early.
-- If you want `add` to create a file that doesn't exist, we can change the startup behavior so the file is created lazily or `add` is allowed to create the file before the initial read. This is a small fix — tell me if you want that.
-- Tag normalization (trimming and lower/upper-casing) is minimal — tags are stored as the user provided them, but queries are case-insensitive.
+- If the program errors while reading the data file at startup, verify the selected file exists and is readable.
+- The program prefers `--file` only when the provided path exists at startup; otherwise the persisted default is used.
+- Editing and completing entries currently rewrite the normalized file. If you want in-place single-line edits that preserve file order, I can implement a safer in-place update that maps printed indices to physical lines.
 
 ---
 
 ## Next steps / Suggested improvements
 
-- Allow `--file` to be used even if the path doesn't exist and have `add` create the file (recommended UX improvement).
-- Add structured `add` flags (`--date`, `--desc`, `--tags`) to avoid constructing a single line on the command line.
-- Add unit tests for the parser and query logic (particularly `split_on_tab_or_spaces`, `parse_line`, and tag matching).
-- Add a `remove` / `edit` command to modify existing entries.
-- Add optional output formats (JSON, CSV) or more friendly pretty-printing.
+- Add a non-interactive `--set-default --create` mode to create the file automatically without prompting.
+- Make the saved-config file path configurable via `--config` or an environment variable.
+- Add structured `add` flags (`--date`, `--desc`, `--tags`).
+- Add unit tests for the parser and query logic (`split_on_tab_or_spaces`, `parse_line`, tag matching).
+- Add optional output formats (JSON/CSV) and more flexible table layout.
 
----
-
-If you want any of the suggested tweaks implemented, tell me which one and I will make the change and run the build/tests.
+If you want any of these implemented, tell me which one and I will make the change and run the build/tests.
