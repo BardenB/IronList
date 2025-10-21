@@ -18,6 +18,10 @@ struct Cli {
     #[arg(long = "show-default")]
     show_default: bool,
 
+    /// Show all entries including those tagged `complete` (by default completed entries are hidden)
+    #[arg(long = "show-all")]
+    show_all: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -28,7 +32,7 @@ enum Commands {
     List {},
     /// Append a raw entry line to the todo file. The line should follow the expected format.
     Add {
-        /// The raw line to append (e.g. "YYYY-MM-DD\tDescription\ttag1,tag2")
+        /// The raw line to append (e.g. "YYYY-MM-DD    Description    tag1,tag2")
         #[arg(value_name = "LINE")]
         line: String,
     },
@@ -73,13 +77,32 @@ enum Commands {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Entry {
     date: NaiveDate,
     desc: String,
     tags: Vec<String>,
     #[allow(dead_code)]
     raw_line: String,
+}
+
+fn is_complete(e: &Entry) -> bool {
+    e.tags.iter().any(|t| t.eq_ignore_ascii_case("complete"))
+}
+
+/// Return indices (into the original entries slice) for the entries that should be visible
+/// given the `show_all` flag.
+fn visible_indices(entries: &[Entry], show_all: bool) -> Vec<usize> {
+    if show_all {
+        (0..entries.len()).collect()
+    } else {
+        entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| !is_complete(e))
+            .map(|(i, _)| i)
+            .collect()
+    }
 }
 
 fn parse_line(line: &str) -> Option<Entry> {
@@ -287,6 +310,22 @@ fn print_numbered(entries: &[Entry]) {
     }
 }
 
+fn print_titled_tables(all_entries: &[Entry], show_all: bool) {
+    // First table: incomplete entries
+    let incomplete: Vec<Entry> = all_entries.iter().filter(|e| !is_complete(e)).cloned().collect();
+    print_numbered(&incomplete);
+
+    // If requested, print completed entries in a second table below
+    if show_all {
+        let completed: Vec<Entry> = all_entries.iter().filter(|e| is_complete(e)).cloned().collect();
+        if !completed.is_empty() {
+            println!("");
+            println!("Completed:");
+            print_numbered(&completed);
+        }
+    }
+}
+
 /// Simple word-wrap helper: splits on whitespace and builds lines of maximum `width` characters.
 fn wrap_text(s: &str, width: usize) -> Vec<String> {
     if s.trim().is_empty() {
@@ -401,7 +440,8 @@ fn main() -> io::Result<()> {
 
     match cli.command {
         None | Some(Commands::List {}) => {
-            print_numbered(&entries);
+            // Print incomplete entries first; if --show-all, show completed entries in a second table
+            print_titled_tables(&entries, cli.show_all);
         }
         Some(Commands::Query { from, to, date, tag, any }) => {
             // Require at least one criterion (date range, exact date, or tag)
@@ -423,9 +463,10 @@ fn main() -> io::Result<()> {
 
             let by_date = filter_by_date_range(entries, from_date, to_date);
             let by_tags = filter_by_tags(by_date, &tag, any);
-            print_numbered(&by_tags);
-        }
-    Some(Commands::Add { line }) => {
+            // Print incomplete matches first; if --show-all, show completed matches in a separate table
+            print_titled_tables(&by_tags, cli.show_all);
+            }
+        Some(Commands::Add { line }) => {
             // Validate and normalize the line before appending
             let parsed = match parse_line(&line) {
                 Some(e) => e,
@@ -437,8 +478,8 @@ fn main() -> io::Result<()> {
             let norm = entry_to_line(&parsed);
             append_entry(&file_path, &norm)?;
             println!("Appended normalized entry to {}", file_path.display());
-        }
-    Some(Commands::Edit { index, line }) => {
+            }
+        Some(Commands::Edit { index, line }) => {
             // Validate replacement
             let parsed = match parse_line(&line) {
                 Some(e) => e,
@@ -448,25 +489,32 @@ fn main() -> io::Result<()> {
                 }
             };
 
-            if index == 0 || index > entries.len() {
-                eprintln!("Index out of range: {} (there are {} entries)", index, entries.len());
+
+            // Map the user-provided index (1-based within visible list) to the original entries vector
+            let vis_idxs = visible_indices(&entries, cli.show_all);
+            if index == 0 || index > vis_idxs.len() {
+                eprintln!("Index out of range: {} (there are {} visible entries)", index, vis_idxs.len());
                 std::process::exit(1);
             }
+            let orig_idx = vis_idxs[index - 1];
 
-            // Replace (index is 1-based)
-            entries[index - 1] = parsed;
+            // Replace (mapped index)
+            entries[orig_idx] = parsed;
 
             // Write all entries back to the file (normalized)
             write_entries_to_file(&file_path, &entries)?;
             println!("Replaced entry {} in {}", index, file_path.display());
-        }
-    Some(Commands::Complete { index }) => {
-            if index == 0 || index > entries.len() {
-                eprintln!("Index out of range: {} (there are {} entries)", index, entries.len());
+            }
+        Some(Commands::Complete { index }) => {
+            // Map index from visible list to original entries vector
+            let vis_idxs = visible_indices(&entries, cli.show_all);
+            if index == 0 || index > vis_idxs.len() {
+                eprintln!("Index out of range: {} (there are {} visible entries)", index, vis_idxs.len());
                 std::process::exit(1);
             }
+            let orig_idx = vis_idxs[index - 1];
 
-            let tags = &mut entries[index - 1].tags;
+            let tags = &mut entries[orig_idx].tags;
             // add 'complete' tag if not already present (case-insensitive)
             if !tags.iter().any(|t| t.eq_ignore_ascii_case("complete")) {
                 tags.push("complete".to_string());
@@ -474,7 +522,7 @@ fn main() -> io::Result<()> {
 
             write_entries_to_file(&file_path, &entries)?;
             println!("Marked entry {} as complete in {}", index, file_path.display());
-        }
+            }
     }
 
     Ok(())
@@ -578,4 +626,3 @@ fn clear_saved_default() -> io::Result<()> {
     Ok(())
 }
 
-// Note: repository search helpers were removed because the file path is currently hardcoded.
