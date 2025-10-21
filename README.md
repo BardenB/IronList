@@ -1,9 +1,7 @@
 
 # IronList
 
-A small CLI tool for managing a simple date-tagged todo list stored in a plain text file.
-
-This README documents the current commands, flags and behaviors implemented in the codebase.
+A small CLI tool for managing a simple date-tagged to-do list stored in a plain text file.
 
 ---
 
@@ -12,7 +10,7 @@ This README documents the current commands, flags and behaviors implemented in t
 IronList stores each entry as a single, normalized line:
 
 ```
-YYYY-MM-DD<TAB>Description<TAB>tag1,tag2
+YYYY-MM-DD    Description    tag1,tag2
 ```
 
 - Input parsing accepts literal TAB characters or runs of 4+ spaces as field separators (helpful when shells make typing tabs awkward).
@@ -23,15 +21,15 @@ YYYY-MM-DD<TAB>Description<TAB>tag1,tag2
 
 ## Build
 
-You need Rust and Cargo installed.
+You need Rust and Cargo installed, which I assume will be done.
 
-```powershell
+```
 # build the project (crate folder)
 cd iron-list
 cargo build --release
 ```
 
-For day-to-day development use `cargo build`.
+For day-to-day development, use `cargo build`.
 
 ---
 
@@ -91,6 +89,8 @@ cargo run -- <command> [options]
 Global option
 - `-f`, `--file <FILE>` — Path to the todo file. The program will use this path only if it exists at startup; otherwise the persisted default will be used.
 
+- `--show-all` — When provided, the program will include entries tagged `complete` in the output. By default completed entries are omitted from the main list and, when `--show-all` is used, they are printed in a separate "Completed:" table below the main list.
+
 ---
 
 ## Commands
@@ -103,46 +103,55 @@ cargo run -- list
 
 Prints a three-column table with headers and wrapped task descriptions:
 
-- Column 1: `No` — item number (right-aligned).
-- Column 2: `Date` — `YYYY-MM-DD` (10 chars).
-- Column 3: `Task` — description (30 characters width, word-wrapped).
-- Column 4: `Tags` — comma-separated tags (left-aligned; width ~20 in the current layout).
+- Column 1: `No` — item number (right-aligned)
+- Column 2: `Date` — `YYYY-MM-DD`
+- Column 3: `Task` — description
+- Column 4: `Tags` — comma-separated tags
 
 The output is sorted by date ascending. Multi-line task descriptions are printed with continuation lines aligned under the `Task` column.
 
-Example:
+Behavior regarding completed items:
+- By default entries tagged `complete` are not shown in the main table.
+- If you pass `--show-all`, the program prints two tables: first the incomplete items (numbered), then a second labeled `Completed:` containing completed items (also numbered independently).
+
+Example showing completed items in a second table:
 
 ```
  No   Date        Task                           Tags
 ---  ----------  ------------------------------  --------------------
-  1. 2025-10-18  Buy iron and supplies           tools,home
-     2025-10-18  (continued task text wraps here)
+  1. 2025-09-19  out of order test               uhoh
+  2. 2025-10-19  Email someone                   home,priority,testing
+
+Completed:
+ No   Date        Task                           Tags
+---  ----------  ------------------------------  --------------------
+  1. 2025-10-19  Go to Kroger                    groceries,home,complete
 ```
 
 ### add
 
-```powershell
+```
 cargo run -- add "<LINE>"
 ```
 
 Append a new entry. `LINE` must contain at least a date and a description. Expected input example:
 
 ```
-YYYY-MM-DD<TAB>Description<TAB>tag1,tag2
+YYYY-MM-DD    Description    tag1,tag2
 ```
 
-Because tabs are inconvenient in some shells the parser also accepts runs of 4+ spaces as separators. Valid examples:
+Because tabs are inconvenient in some shells the parser also accepts runs of 4+ spaces as separators. Valid example:
 
-```powershell
-cargo run -- add "2025-10-18\tBuy iron\ttools,home"
+
+```
 cargo run -- add "2025-10-18    Buy iron    tools,home"
 ```
 
-On add the program validates the date and presence of a description. If valid it writes a normalized tab-separated line to disk.
+On `add`, the program validates the date and presence of a description. If valid it writes a normalized tab-separated line to disk.
 
 ### edit
 
-```powershell
+```
 cargo run -- edit <INDEX> "<LINE>"
 ```
 
@@ -150,7 +159,7 @@ Replace the numbered entry shown by `list` with the provided normalized line. Th
 
 ### complete
 
-```powershell
+```
 cargo run -- complete <INDEX>
 ```
 
@@ -158,8 +167,8 @@ Mark the chosen (numbered) entry as complete by adding a `complete` tag (case-in
 
 ### query
 
-```powershell
-cargo run -- query [--from DATE] [--to DATE] [--date DATE] [--tag TAG]... [--any]
+```
+cargo run -- query [--from DATE] [--to DATE] [--date DATE] [--any] [--tag TAG]...
 ```
 
 Filter by date range and/or tags. At least one of `--from`, `--to`, `--date`, or `--tag` must be provided.
@@ -173,11 +182,11 @@ Options:
 
 Behavior notes:
 - Date filtering is inclusive and combined with tag filtering.
-- Tags are matched case-insensitively.
+- Tags are case-insensitive.
 
 Example:
 
-```powershell
+```
 cargo run -- query --date 2025-10-18 --tag work --tag urgent
 ```
 
@@ -185,8 +194,8 @@ cargo run -- query --date 2025-10-18 --tag work --tag urgent
 
 ## File format details
 
-- Each entry is a single line: `YYYY-MM-DD<TAB>Description<TAB>tag1,tag2`.
-- Accepted input separators when parsing: literal `\t` or runs of 4+ spaces.
+- Each entry is a single line: `YYYY-MM-DD    Description    tag1,tag2`.
+- Accepted input separators when parsing: literal `\t` or runs of 4+ spaces (suggested to use 4+ spaces).
 - On write, entries are normalized to the canonical tab-separated form.
 - Tag matching for queries is case-insensitive; stored tags preserve the user's casing.
 
@@ -194,39 +203,39 @@ cargo run -- query --date 2025-10-18 --tag work --tag urgent
 
 ## Examples (quick)
 
-Append using spaces:
+Append:
 
-```powershell
+```
 cargo run -- add "2025-10-18    Buy iron    tools,home"
 ```
 
 Show saved default:
 
-```powershell
+```
 cargo run -- --show-default
 ```
 
 Set default (creates file if you confirm):
 
-```powershell
-cargo run -- --set-default C:\Users\barde\IronList\ironlist.txt
+```
+cargo run -- --set-default path\to\ironlist.txt
 ```
 
 Clear saved default:
 
-```powershell
+```
 cargo run -- --set-default -
 ```
 
 List everything (no subcommand required):
 
-```powershell
+```
 cargo run --
 ```
 
 Query with OR tags:
 
-```powershell
+```
 cargo run -- query --any --tag personal --tag errands
 ```
 
@@ -236,7 +245,6 @@ cargo run -- query --any --tag personal --tag errands
 
 - If the program errors while reading the data file at startup, verify the selected file exists and is readable.
 - The program prefers `--file` only when the provided path exists at startup; otherwise the persisted default is used.
-- Editing and completing entries currently rewrite the normalized file. If you want in-place single-line edits that preserve file order, I can implement a safer in-place update that maps printed indices to physical lines.
 
 ---
 
@@ -244,8 +252,6 @@ cargo run -- query --any --tag personal --tag errands
 
 - Add a non-interactive `--set-default --create` mode to create the file automatically without prompting.
 - Make the saved-config file path configurable via `--config` or an environment variable.
-- Add structured `add` flags (`--date`, `--desc`, `--tags`).
 - Add unit tests for the parser and query logic (`split_on_tab_or_spaces`, `parse_line`, tag matching).
-- Add optional output formats (JSON/CSV) and more flexible table layout.
 
-If you want any of these implemented, tell me which one and I will make the change and run the build/tests.
+
