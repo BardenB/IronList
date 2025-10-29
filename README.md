@@ -13,23 +13,19 @@ IronList stores each entry as a single, normalized line:
 YYYY-MM-DD    Description    tag1,tag2
 ```
 
-- Input parsing accepts literal TAB characters or runs of 4+ spaces as field separators (helpful when shells make typing tabs awkward).
-- On write (when adding or editing) the program normalizes entries to the canonical tab-separated format.
-- Tags are an optional comma-separated list in the third field; queries match tags case-insensitively by default.
+- Input parsing uses 4+ spaces as field separators (supposed to be able to use literal tabs, but does not currently work as intended, at least on powershell).
+- On write (when adding or editing) the program normalizes entries to the canonical tab-separated format. i.e. the text file itself uses tabs even though input in CLI is spaces.
+- Tags are an optional comma-separated list in the third field; tags are case-insensitive when using the query option.
 
 ---
 
 ## Build
 
-You need Rust and Cargo installed, which I assume will be done.
+You need Rust and Cargo installed, which 
 
-```
-# build the project (crate folder)
-cd iron-list
-cargo build --release
-```
+For day-to-day development, use `cargo build`. For fully optimized `.exe` file, add the `--release` flag.
 
-For day-to-day development, use `cargo build`.
+For help with Rust, see its [documentation here.](https://doc.rust-lang.org/stable/book/title-page.html)
 
 ---
 
@@ -37,22 +33,21 @@ For day-to-day development, use `cargo build`.
 
 The program chooses a data file using the following precedence:
 
-1. If you pass `-f/--file <PATH>` and that path exists at startup, it is used.
-2. Otherwise the program uses a persisted default path (created by the program on first run or set with `--set-default`).
-3. If no persisted default exists the program prompts you to enter one interactively and saves it.
-
-Persistence location:
-- Preferred: `$HOME/.ironlist_default` (the user's home directory).
-- Fallback: `./.ironlist_default` in the current working directory.
+1. The program uses a persisted defaulted file path (created by the program on first run or set with `--set-default`).
+    - Preferred: `$HOME/.ironlist_default` (the user's home directory).
+    - Fallback: `./.ironlist_default` in the current working directory.
+2. If no persisted default exists the program prompts you to enter one interactively and saves it.
+2. If you pass `-f/--file <PATH>` and that path exists at startup, it is used.
 
 Commands to manage the saved default:
-- `--set-default <PATH>` — saves the provided path and exits. If the path does not exist the program prompts to create it. Passing `-` (a single dash) clears the saved default.
+- `--set-default <PATH>` — saves the provided path and exits. If the path does not exist the program prompts to create it. 
+- Passing `-` (a single dash) clears the saved default.
 - `--show-default` — prints the currently saved default (or `No saved default`) and exits.
 
 Examples:
 
-```powershell
-# persist a default path (prompts to create file if missing)
+```
+# set default path (prompts to create file if missing)
 cargo run -- --set-default C:\path\to\ironlist.txt
 
 # clear saved default
@@ -63,7 +58,7 @@ cargo run -- --show-default
 ```
 
 Notes:
-- The program reads the selected file at startup. If the final selected path does not exist, the program will error when reading entries (unless you created the file earlier or chose to create it during `--set-default`).
+- The program reads the selected file at startup. If the final selected path does not exist, the program will error when reading entries.
 - You can still use `--file` to temporarily point to a different file (only used if the path exists at startup).
 
 ---
@@ -72,12 +67,9 @@ Notes:
 
 Top-level flags work without providing a subcommand. If no subcommand is given the default action is `list`.
 
-```powershell
+```
 # show help
 cargo run -- --help
-
-# show saved default
-cargo run -- --show-default
 
 # list (no subcommand required)
 cargo run --
@@ -86,10 +78,10 @@ cargo run --
 cargo run -- <command> [options]
 ```
 
-Global option
-- `-f`, `--file <FILE>` — Path to the todo file. The program will use this path only if it exists at startup; otherwise the persisted default will be used.
+Global options
+- `-f`, `--file <FILE>` — Path to the to do file. The program will use this path only if it exists at startup; otherwise the persisted default will be used.
 
-- `--show-all` — When provided, the program will include entries tagged `complete` in the output. By default completed entries are omitted from the main list and, when `--show-all` is used, they are printed in a separate "Completed:" table below the main list.
+- `--show-all` — When provided, the program will include entries tagged `complete` in the output. By default completed entries are omitted from the main list.
 
 ---
 
@@ -97,13 +89,13 @@ Global option
 
 ### list (default)
 
-```powershell
+```
 cargo run -- list
 ```
 
 Prints a three-column table with headers and wrapped task descriptions:
 
-- Column 1: `No` — item number (right-aligned)
+- Column 1: `No.` — item number (right-aligned)
 - Column 2: `Date` — `YYYY-MM-DD`
 - Column 3: `Task` — description
 - Column 4: `Tags` — comma-separated tags
@@ -119,13 +111,13 @@ Example showing completed items in a second table:
 ```
  No   Date        Task                           Tags
 ---  ----------  ------------------------------  --------------------
-  1. 2025-09-19  out of order test               uhoh
+  1. 2025-09-19  Make Dinner                     food, groceries
   2. 2025-10-19  Email someone                   home,priority,testing
 
 Completed:
  No   Date        Task                           Tags
 ---  ----------  ------------------------------  --------------------
-  1. 2025-10-19  Go to Kroger                    groceries,home,complete
+  1. 2025-09-19  Go to Kroger                    groceries,home,complete
 ```
 
 ### add
@@ -140,12 +132,7 @@ Append a new entry. `LINE` must contain at least a date and a description. Expec
 YYYY-MM-DD    Description    tag1,tag2
 ```
 
-Because tabs are inconvenient in some shells the parser also accepts runs of 4+ spaces as separators. Valid example:
-
-
-```
-cargo run -- add "2025-10-18    Buy iron    tools,home"
-```
+Because tabs are inconvenient in some shells the parser also accepts runs of 4+ spaces as separator. As of 2025-10-28, literal tab characters does not work at all.
 
 On `add`, the program validates the date and presence of a description. If valid it writes a normalized tab-separated line to disk.
 
@@ -163,7 +150,7 @@ Replace the numbered entry shown by `list` with the provided normalized line. Th
 cargo run -- complete <INDEX>
 ```
 
-Mark the chosen (numbered) entry as complete by adding a `complete` tag (case-insensitive check prevents duplicates). This operation currently rewrites the normalized file.
+Mark the chosen (numbered) entry as complete by adding a `complete` tag (case-insensitive check prevents duplicates). This command rewrites the .txt file.
 
 ### query
 
@@ -184,7 +171,7 @@ Behavior notes:
 - Date filtering is inclusive and combined with tag filtering.
 - Tags are case-insensitive.
 
-Example:
+The follwoing example will return all entries on 2025-10-18 with both work and urgent tags:
 
 ```
 cargo run -- query --date 2025-10-18 --tag work --tag urgent
@@ -195,7 +182,7 @@ cargo run -- query --date 2025-10-18 --tag work --tag urgent
 ## File format details
 
 - Each entry is a single line: `YYYY-MM-DD    Description    tag1,tag2`.
-- Accepted input separators when parsing: literal `\t` or runs of 4+ spaces (suggested to use 4+ spaces).
+- Accepted input separators when parsing: literal `\t` or runs of 4+ spaces (suggested to use 4+ spaces as literal tabs do not work in most if not all places).
 - On write, entries are normalized to the canonical tab-separated form.
 - Tag matching for queries is case-insensitive; stored tags preserve the user's casing.
 
@@ -206,7 +193,7 @@ cargo run -- query --date 2025-10-18 --tag work --tag urgent
 Append:
 
 ```
-cargo run -- add "2025-10-18    Buy iron    tools,home"
+cargo run -- add "2025-10-18    Buy iron rod    tools,home"
 ```
 
 Show saved default:
@@ -215,7 +202,7 @@ Show saved default:
 cargo run -- --show-default
 ```
 
-Set default (creates file if you confirm):
+Set default:
 
 ```
 cargo run -- --set-default path\to\ironlist.txt
@@ -250,8 +237,8 @@ cargo run -- query --any --tag personal --tag errands
 
 ## Next steps / Suggested improvements
 
-- Add a non-interactive `--set-default --create` mode to create the file automatically without prompting.
+- Add a non-interactive `--set-default --create` mode to create the file automatically if needed.
 - Make the saved-config file path configurable via `--config` or an environment variable.
-- Add unit tests for the parser and query logic (`split_on_tab_or_spaces`, `parse_line`, tag matching).
+- Add unit tests for all commands and options.
 
 
