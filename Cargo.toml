@@ -7,3 +7,6 @@ edition = "2024"
 clap = { version = "4.2", features = ["derive"] }
 chrono = "0.4"
 dirs = "4.0"
+notify-rust = "4"
+itertools = "0.10"
+thiserror = "1.0"
