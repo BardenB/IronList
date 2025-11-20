@@ -13,8 +13,8 @@ IronList stores each entry as a single, normalized line:
 YYYY-MM-DD    Description    tag1,tag2
 ```
 
-- Input parsing uses 4+ spaces as field separators (supposed to be able to use literal tabs, but does not currently work as intended, at least on powershell).
-- On write (when adding or editing) the program normalizes entries to the canonical tab-separated format. i.e. the text file itself uses tabs even though input in CLI is spaces.
+- Input parsing uses 4+ spaces as field separators (supposed to be able to use literal tabs, but does not currently work as intended across all terminals).
+- When adding or editing a task, the program normalizes entries to tab-separated format. i.e. the text file itself uses tabs even though input in CLI is spaces.
 - Tags are an optional comma-separated list in the third field; tags are case-insensitive when using the query option.
 
 ---
@@ -31,13 +31,13 @@ For help with Rust, see its [documentation here.](https://doc.rust-lang.org/stab
 
 ## Data file selection and configuration
 
-The program chooses a data file using the following precedence:
+IronList chooses a data file using the following precedence:
 
 1. The program uses a persisted defaulted file path (created by the program on first run or set with `--set-default`).
     - Preferred: `$HOME/.ironlist_default` (the user's home directory).
     - Fallback: `./.ironlist_default` in the current working directory.
-2. If no persisted default exists the program prompts you to enter one interactively and saves it.
-2. If you pass `-f/--file <PATH>` and that path exists at startup, it is used.
+2. If no persisted default exists the program prompts you to enter one and saves it.
+3. If you pass `-f/--file <PATH>` and that path exists at startup, it is used.
 
 Commands to manage the saved default:
 - `--set-default <PATH>` — saves the provided path and exits. If the path does not exist the program prompts to create it. 
@@ -48,7 +48,7 @@ Examples:
 
 ```
 # set default path (prompts to create file if missing)
-cargo run -- --set-default C:\path\to\ironlist.txt
+cargo run -- --set-default C:\path\to\example.txt
 
 # clear saved default
 cargo run -- --set-default -
@@ -102,9 +102,11 @@ Prints a three-column table with headers and wrapped task descriptions:
 
 The output is sorted by date ascending. Multi-line task descriptions are printed with continuation lines aligned under the `Task` column.
 
-Behavior regarding completed items:
-- By default entries tagged `complete` are not shown in the main table.
-- If you pass `--show-all`, the program prints two tables: first the incomplete items (numbered), then a second labeled `Completed:` containing completed items (also numbered independently).
+#### Completed items:
+- By default, entries tagged `complete` are not shown in the main table.
+- If you pass `--show-all`, the program prints two tables: first the incomplete items (numbered), then a second labeled `Completed:` containing completed items. 
+> [!NOTE] There is no current way to add a due date column, but could be added as a tag.
+> example: "2025-01-01    Go to grocery store    groceries, complete, 2025-01-01"
 
 Example showing completed items in a second table:
 
@@ -183,8 +185,10 @@ cargo run -- query --date 2025-10-18 --tag work --tag urgent
 
 - Each entry is a single line: `YYYY-MM-DD    Description    tag1,tag2`.
 - Accepted input separators when parsing: literal `\t` or runs of 4+ spaces (suggested to use 4+ spaces as literal tabs do not work in most if not all places).
-- On write, entries are normalized to the canonical tab-separated form.
-- Tag matching for queries is case-insensitive; stored tags preserve the user's casing.
+- `--add` and `--edit` convert 4 space separators in the terminal to tabs in the .txt file.
+- Tag matching for queries is case-insensitive.
+
+- I would like to add a list that is undated. It would not be sorted by date, then, and instead by whatever the .txt file says. Everything else would function normally.
 
 ---
 
@@ -205,7 +209,7 @@ cargo run -- --show-default
 Set default:
 
 ```
-cargo run -- --set-default path\to\ironlist.txt
+cargo run -- --set-default assets\example.txt
 ```
 
 Clear saved default:
@@ -237,8 +241,10 @@ cargo run -- query --any --tag personal --tag errands
 
 ## Next steps / Suggested improvements
 
-- Add a non-interactive `--set-default --create` mode to create the file automatically if needed.
-- Make the saved-config file path configurable via `--config` or an environment variable.
 - Add unit tests for all commands and options.
+- Refactor, reorganize, de-duplicate, and get rid of the AI inefficiencies in this code.
+- Add multiple entires at once
+- Undated list for tasks that do not need a due date, but should still be written down.
+- `cargo run -- list --show-all` does not work? 
 
 

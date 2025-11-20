@@ -1,5 +1,0 @@
-2025-09-19	out of order test	uhoh
-2025-10-19	Go to Kroger	groceries,home,complete
-2025-10-19	Email someone	home,priority,testing
-2025-10-25	asdfasf	home,priority,testing
-2025-11-15	Let's test some more interesting to do list descriptions, incorporating punctuation and !@#$%^&*()	testing
